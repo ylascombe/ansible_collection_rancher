@@ -133,8 +133,25 @@ EXAMPLES = '''
       name: "rancher_working_group"
       state: present
       cluster_id: "c-cluster-id"
+      
+- name: Update project to add quotas.
+  rancher_project:
+      url: "https://rancher.example.com"
+      rancher_user: "admin"
+      rancher_password: "{{ some_api_token_value }}"
+      name: "rancher_working_group"
+      state: present
+      cluster_id: "c-cluster-id"
+      resource_quota:
+        limit:
+          limitsCpu: "4000m"
+          limitsMemory: "4096Mi"
+      namespace_default_resource_quota:
+        limit:
+          limitsCpu: "1000m"
+          limitsMemory: "1024Mi"
 
-- name: Delete a project
+- name: Delete a project.
   rancher_project:
       url: "https://rancher.example.com"
       rancher_api_key: "{{ some_api_token_value }}"
@@ -237,6 +254,10 @@ class RancherProject(object):
             resp = requests.post(full_url, headers=headers, data=data)
         elif method == 'PUT':
             resp = requests.put(full_url, headers=headers, data=data)
+        elif method == 'DELETE':
+            resp = requests.delete(full_url, headers=headers, data=data)
+        else:
+            self._module.fail_json(failed=True, msg="Method not expected %s" % (method))
 
         status_code = resp.status_code
 
@@ -334,10 +355,10 @@ class RancherProject(object):
         #self._module.fail_json(failed=True, msg="get rancher token request end with %d status code with message: %d %s" % (response, response.text))
         return response
     
-    # def delete_project(self, cluster_id):
-    #     url = "/api/projects/{cluster_id}".format(cluster_id=cluster_id)
-    #     response = self._send_request(url, headers=self.headers, method="DELETE")
-    #     return response
+    def delete_project(self, project_id):
+        url = "/v3/projects/{project_id}".format(project_id=project_id)
+        response = self._send_request(url, headers=self.headers, method="DELETE")
+        return response
 
 def setup_module_object():
     module = AnsibleModule(
@@ -403,6 +424,7 @@ def main():
             #if enable_monitoring != project['enableProjectMonitoring']:
             
             project = rancher_iface.update_project(name, cluster_id, copy)
+            changed = True
         # if namespaces is not None:
         #     cur_namespaces = rancher_iface.get_project_namespaces(project.get("id"))
         #     plan = diff_namespaces(namespaces, cur_namespaces)
@@ -421,7 +443,8 @@ def main():
         res_project['cluster_id'] = project['clusterId']
         res_project['created'] = project['created']
         res_project['creator_id'] = project['creatorId']
-        res_project['description'] = project['description']
+        if 'description' in project.keys():
+          res_project['description'] = project['description']
         res_project['labels'] = project['labels']
         res_project['resource_quota'] = project['resourceQuota']
         res_project['monitoring_enabled'] = project['enableProjectMonitoring']
@@ -431,7 +454,7 @@ def main():
         project = rancher_iface.get_project(name, cluster_id)
         if project is None:
             module.exit_json(failed=False, changed=False, message="No project found")
-        result = rancher_iface.delete_project(project.get("id"))
+        result = rancher_iface.delete_project(project['id'])
         module.exit_json(failed=False, changed=True, message=result.get("message"))
 
 
