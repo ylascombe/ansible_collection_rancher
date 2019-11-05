@@ -468,13 +468,14 @@ def main():
         if 'description' in project.keys():
             res_project['description'] = project['description']
 
-        module.exit_json(failed=False, changed=changed, project=res_project, msg=stdout_lines)
+        module.exit_json(failed=False, changed=changed, project=res_project, message=stdout_lines)
     elif state == 'absent':
         project = rancher_iface.get_project(name, cluster_id)
         if project is None:
             module.exit_json(failed=False, changed=False, message="No project found")
         result = rancher_iface.delete_project(project['id'])
-        module.exit_json(failed=False, changed=True, message=result.get("message"))
+        stdout_lines.append("project %s was deleted" % project['id'])
+        module.exit_json(failed=False, changed=True, result=result, message=stdout_lines)
 
 
 def diff_namespaces(target, current):
