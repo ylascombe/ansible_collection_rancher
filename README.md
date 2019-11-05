@@ -1,9 +1,21 @@
-Simple ansible module that enable to manage (create, update, delete) rancher projects.
+ # Ansible Collection - ylascombe.rancher
 
-# How to use it
+Ansible collection to manage rancher projects.
 
-* Import `library` folder into your project.
-* Use the module in a tasks:
+Contains:
+- a `rancher_project` module that enable to manage (create, update, delete) rancher projects.
+
+# How to use `rancher_project` module
+
+## Import the collection in your project
+
+Classic method: 
+`ansible-galaxy install ylascombe/rancher`
+
+Development method:
+Create a symbolic link from the `plugins/modules` folder of this project to `library` folder on your project 
+
+## Use the module in a tasks:
 
 ```yaml
 - hosts: localhost

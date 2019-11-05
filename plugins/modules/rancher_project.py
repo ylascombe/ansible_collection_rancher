@@ -210,6 +210,7 @@ import json
 import string
 import requests
 #import pdb
+import collections
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.urls import fetch_url, url_argument_spec, basic_auth_header
@@ -360,6 +361,7 @@ class RancherProject(object):
         response = self._send_request(url, headers=self.headers, method="DELETE")
         return response
 
+
 def setup_module_object():
     module = AnsibleModule(
         argument_spec=argument_spec,
@@ -405,6 +407,7 @@ def main():
     namespace_default_resource_quota = module.params['namespace_default_resource_quota']
 
     rancher_iface = RancherProject(module)
+    stdout_lines = []
 
     changed = False
     if state == 'present':
@@ -413,18 +416,33 @@ def main():
 
         if project is None:
             project = rancher_iface.create_project(name, cluster_id)
-            # project = rancher_iface.get_project(name)
             changed = True
+            stdout_lines.append("project %s was created with basic data" % name)
         else:
-            copy = project
-            copy['enableProjectMonitoring'] = enable_monitoring
-            copy['resourceQuota'] = resource_quota
-            copy['namespaceDefaultResourceQuota'] = namespace_default_resource_quota
-            
-            #if enable_monitoring != project['enableProjectMonitoring']:
-            
-            project = rancher_iface.update_project(name, cluster_id, copy)
-            changed = True
+          stdout_lines.append("project %s already exists" % name)
+        
+        to_update = False
+
+        if project['enableProjectMonitoring'] != enable_monitoring:
+           to_update = True
+           stdout_lines.append("enableProjectMonitoring will be changed from %s (current) to %s (asked)" % (project['enableProjectMonitoring'], enable_monitoring))
+        if is_quota_have_changed(resource_quota, project['resourceQuota']):
+           to_update = True
+           stdout_lines.append("resourceQuota will be changed from %s (current) to %s (asked)" % (project['resourceQuota'], resource_quota))
+        if is_quota_have_changed(namespace_default_resource_quota, project['namespaceDefaultResourceQuota']):
+           to_update = True
+           stdout_lines.append("namespaceDefaultResourceQuota will be changed from %s (current) to %s (asked)" % (project['namespaceDefaultResourceQuota'], namespace_default_resource_quota))
+
+        #if enable_monitoring != project['enableProjectMonitoring']:
+        if to_update:
+          copy = project
+          copy['enableProjectMonitoring'] = enable_monitoring
+          copy['resourceQuota'] = resource_quota
+          copy['namespaceDefaultResourceQuota'] = namespace_default_resource_quota
+          
+          #module.exit_json(failed=True, changed=True, message="ici ca passe")  
+          project = rancher_iface.update_project(name, cluster_id, copy)
+          changed = True
         # if namespaces is not None:
         #     cur_namespaces = rancher_iface.get_project_namespaces(project.get("id"))
         #     plan = diff_namespaces(namespaces, cur_namespaces)
@@ -443,13 +461,14 @@ def main():
         res_project['cluster_id'] = project['clusterId']
         res_project['created'] = project['created']
         res_project['creator_id'] = project['creatorId']
-        if 'description' in project.keys():
-          res_project['description'] = project['description']
         res_project['labels'] = project['labels']
         res_project['resource_quota'] = project['resourceQuota']
+        res_project['namespace_default_resource_quota'] = project['namespaceDefaultResourceQuota']
         res_project['monitoring_enabled'] = project['enableProjectMonitoring']
-
-        module.exit_json(failed=False, changed=changed, project=project)
+        if 'description' in project.keys():
+          res_project['description'] = project['description']
+        
+        module.exit_json(failed=False, changed=changed, project=res_project, msg=stdout_lines)
     elif state == 'absent':
         project = rancher_iface.get_project(name, cluster_id)
         if project is None:
@@ -467,6 +486,22 @@ def diff_namespaces(target, current):
         if member not in target:
             diff["to_del"].append(member)
     return diff
+        
+def is_quota_have_changed(spec, actual):
+  changed = False
+    
+  for key, value in spec.items():
+    if key in actual:
+      if isinstance(actual[key], dict) and isinstance(spec[key], collections.Mapping):
+        changed = is_quota_have_changed(spec[key], actual[key])
+      else:
+        print("comparing key %s" % key)
+        changed = value != actual[key]
+    else:
+      changed = True # new key
+    
+    if changed:
+      return changed # means True
 
 
 if __name__ == '__main__':
