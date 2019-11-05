@@ -210,6 +210,7 @@ import json
 import string
 import requests
 #import pdb
+import collections
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.urls import fetch_url, url_argument_spec, basic_auth_header
@@ -230,7 +231,7 @@ class RancherProject(object):
         else:
             token = self.get_rancher_token(rancher_url, module.params['url_username'],module.params['url_password'], module)
             self.headers["Authorization"] = str('Bearer %s' % token)
-            
+
         self.headers["Accept"] = "*/*"
         self.headers["Cache-Control"] = "no-cache"
         self.headers["Host"] = rancher_url.replace('https://', '').replace('/','')
@@ -247,7 +248,7 @@ class RancherProject(object):
             headers = []
 
         full_url = "{rancher_url}{path}".format(rancher_url=self.rancher_url, path=url)
-        
+
         if method == 'GET':
             resp = requests.get(full_url, headers=headers, data=data)
         elif method == 'POST':
@@ -297,7 +298,7 @@ class RancherProject(object):
 
         stdout = "url: %s" % full_url
         stdout += "%s\ndata:%s" % (stdout, data)
-        
+
         #resp, info = fetch_url(self._module, full_url, data=module.jsonify(data), headers=headers, method="POST")
         resp = requests.post("%s" % (full_url), data=json.dumps(data),headers=headers)
 
@@ -349,16 +350,17 @@ class RancherProject(object):
     #def update_project(self, name, cluster_id, resource_quotas=dict(), namespace_default_resource_quota=dict()):
     def update_project(self, name, cluster_id, project):
         url = "/v3/projects/{project_id}?_replace=true".format(project_id=project["id"])
-        
+
         ## pdb.set_trace()
         response = self._send_request(url, data=project, headers=self.headers, method="PUT")
         #self._module.fail_json(failed=True, msg="get rancher token request end with %d status code with message: %d %s" % (response, response.text))
         return response
-    
+
     def delete_project(self, project_id):
         url = "/v3/projects/{project_id}".format(project_id=project_id)
         response = self._send_request(url, headers=self.headers, method="DELETE")
         return response
+
 
 def setup_module_object():
     module = AnsibleModule(
@@ -405,6 +407,7 @@ def main():
     namespace_default_resource_quota = module.params['namespace_default_resource_quota']
 
     rancher_iface = RancherProject(module)
+    stdout_lines = []
 
     changed = False
     if state == 'present':
@@ -413,16 +416,31 @@ def main():
 
         if project is None:
             project = rancher_iface.create_project(name, cluster_id)
-            # project = rancher_iface.get_project(name)
             changed = True
+            stdout_lines.append("project %s was created with basic data" % name)
         else:
+            stdout_lines.append("project %s already exists" % name)
+
+        to_update = False
+
+        if project['enableProjectMonitoring'] != enable_monitoring:
+            to_update = True
+            stdout_lines.append("enableProjectMonitoring will be changed from %s (current) to %s (asked)" % (project['enableProjectMonitoring'], enable_monitoring))
+        if is_quota_have_changed(resource_quota, project['resourceQuota']):
+            to_update = True
+            stdout_lines.append("resourceQuota will be changed from %s (current) to %s (asked)" % (project['resourceQuota'], resource_quota))
+        if is_quota_have_changed(namespace_default_resource_quota, project['namespaceDefaultResourceQuota']):
+            to_update = True
+            stdout_lines.append("namespaceDefaultResourceQuota will be changed from %s (current) to %s (asked)" % (project['namespaceDefaultResourceQuota'], namespace_default_resource_quota))
+
+        #if enable_monitoring != project['enableProjectMonitoring']:
+        if to_update:
             copy = project
             copy['enableProjectMonitoring'] = enable_monitoring
             copy['resourceQuota'] = resource_quota
             copy['namespaceDefaultResourceQuota'] = namespace_default_resource_quota
-            
-            #if enable_monitoring != project['enableProjectMonitoring']:
-            
+
+            #module.exit_json(failed=True, changed=True, message="ici ca passe")
             project = rancher_iface.update_project(name, cluster_id, copy)
             changed = True
         # if namespaces is not None:
@@ -443,13 +461,14 @@ def main():
         res_project['cluster_id'] = project['clusterId']
         res_project['created'] = project['created']
         res_project['creator_id'] = project['creatorId']
-        if 'description' in project.keys():
-          res_project['description'] = project['description']
         res_project['labels'] = project['labels']
         res_project['resource_quota'] = project['resourceQuota']
+        res_project['namespace_default_resource_quota'] = project['namespaceDefaultResourceQuota']
         res_project['monitoring_enabled'] = project['enableProjectMonitoring']
+        if 'description' in project.keys():
+            res_project['description'] = project['description']
 
-        module.exit_json(failed=False, changed=changed, project=project)
+        module.exit_json(failed=False, changed=changed, project=res_project, msg=stdout_lines)
     elif state == 'absent':
         project = rancher_iface.get_project(name, cluster_id)
         if project is None:
@@ -467,6 +486,22 @@ def diff_namespaces(target, current):
         if member not in target:
             diff["to_del"].append(member)
     return diff
+
+def is_quota_have_changed(spec, actual):
+    changed = False
+
+    for key, value in spec.items():
+        if key in actual:
+            if isinstance(actual[key], dict) and isinstance(spec[key], collections.Mapping):
+                changed = is_quota_have_changed(spec[key], actual[key])
+            else:
+                print("comparing key %s" % key)
+                changed = value != actual[key]
+        else:
+            changed = True # new key
+
+        if changed:
+            return changed # means True
 
 
 if __name__ == '__main__':
